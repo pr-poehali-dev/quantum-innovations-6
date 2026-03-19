@@ -1,0 +1,12 @@
+{
+  "tests": [
+    {
+      "name": "Get general channel messages",
+      "method": "GET",
+      "path": "/?channel=general",
+      "expectedStatus": 200,
+      "expectedBody": [],
+      "bodyMatcher": "partial"
+    }
+  ]
+}

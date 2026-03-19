@@ -1,0 +1,6 @@
+{
+  "kf-auth": "https://functions.poehali.dev/1ae3f35e-9085-435d-8a8a-e1a717a2a95f",
+  "kf-orders": "https://functions.poehali.dev/f37201cd-7412-4a40-bbbd-b609e54f46ff",
+  "kf-posts": "https://functions.poehali.dev/69f34a74-ec58-41fc-aa7c-ce0114c03985",
+  "kf-chat": "https://functions.poehali.dev/690aa22a-cb8b-4419-901e-71e5bf820e52"
+}
