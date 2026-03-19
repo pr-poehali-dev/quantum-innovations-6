@@ -1,0 +1,1 @@
+ALTER TABLE kf_users ADD CONSTRAINT kf_users_telegram_username_unique UNIQUE (telegram_username);
