@@ -1,11 +1,14 @@
 """
-Auth + Admin Ketfox — авторизация через Telegram, профиль, бан/мут, загрузка изображений.
+Auth + Admin Ketfox — авторизация через Telegram бота (код), профиль, бан/мут, загрузка изображений.
 """
 import json
 import os
 import secrets
 import base64
 import uuid
+import random
+import string
+import urllib.request
 import psycopg2
 import boto3
 from datetime import datetime, timedelta
@@ -20,6 +23,19 @@ CORS = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Auth-Token",
 }
+
+
+def send_telegram_message(chat_id, text):
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode()
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read())
+
+
+def get_tg_user_id_by_username(username):
+    return None
 
 
 def get_user_by_token(token, cur):
@@ -48,7 +64,87 @@ def handler(event: dict, context) -> dict:
     conn = get_conn()
     cur = conn.cursor()
 
-    # POST /register
+    # POST /send-code — генерируем код и отправляем через бота
+    if method == "POST" and path.endswith("/send-code"):
+        body = json.loads(event.get("body") or "{}")
+        tg_username = (body.get("telegram_username") or "").strip().lstrip("@").lower()
+        if not tg_username:
+            conn.close()
+            return {"statusCode": 400, "headers": CORS, "body": json.dumps({"error": "Укажи @username в Telegram"})}
+
+        # Ищем пользователя в БД — если он уже есть, берём его telegram_id
+        cur.execute("SELECT telegram_id FROM kf_users WHERE LOWER(telegram_username) = %s", (tg_username,))
+        row = cur.fetchone()
+        tg_id = row[0] if row else None
+
+        code = "".join(random.choices(string.digits, k=6))
+        cur.execute(
+            "INSERT INTO kf_auth_codes (telegram_username, code) VALUES (%s, %s)",
+            (tg_username, code)
+        )
+        conn.commit()
+
+        if tg_id:
+            try:
+                send_telegram_message(tg_id, f"🦊 <b>Ketfox</b>\n\nТвой код для входа: <code>{code}</code>\n\nДействителен 10 минут.")
+                conn.close()
+                return {"statusCode": 200, "headers": CORS, "body": json.dumps({"ok": True, "sent": True})}
+            except Exception:
+                conn.close()
+                return {"statusCode": 200, "headers": CORS, "body": json.dumps({"ok": True, "sent": False, "manual": True, "code_hint": "Бот не может написать первым. Напиши боту /start, затем запроси код снова."})}
+        else:
+            conn.close()
+            return {"statusCode": 200, "headers": CORS, "body": json.dumps({"ok": True, "sent": False, "new_user": True, "manual": True, "code_hint": f"Ты новый пользователь! Напиши боту /start и отправь команду /code — получишь свой код."})}
+
+    # POST /verify-code — проверяем код и логиним
+    if method == "POST" and path.endswith("/verify-code"):
+        body = json.loads(event.get("body") or "{}")
+        tg_username = (body.get("telegram_username") or "").strip().lstrip("@").lower()
+        code = (body.get("code") or "").strip()
+        display_name = (body.get("display_name") or tg_username).strip()
+
+        if not tg_username or not code:
+            conn.close()
+            return {"statusCode": 400, "headers": CORS, "body": json.dumps({"error": "Нужен username и код"})}
+
+        cur.execute(
+            "SELECT id FROM kf_auth_codes WHERE LOWER(telegram_username) = %s AND code = %s AND used = FALSE AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
+            (tg_username, code)
+        )
+        code_row = cur.fetchone()
+        if not code_row:
+            conn.close()
+            return {"statusCode": 400, "headers": CORS, "body": json.dumps({"error": "Неверный или устаревший код"})}
+
+        cur.execute("UPDATE kf_auth_codes SET used = TRUE WHERE id = %s", (code_row[0],))
+
+        cur.execute("SELECT id, role, is_banned, ban_reason FROM kf_users WHERE LOWER(telegram_username) = %s", (tg_username,))
+        user_row = cur.fetchone()
+
+        if user_row:
+            user_id, role, is_banned, ban_reason = user_row
+            if is_banned:
+                conn.commit()
+                conn.close()
+                return {"statusCode": 403, "headers": CORS, "body": json.dumps({"error": "Аккаунт заблокирован", "reason": ban_reason})}
+        else:
+            cur.execute("SELECT COUNT(*) FROM kf_users")
+            count = cur.fetchone()[0]
+            role = "admin" if count == 0 else "user"
+            username = tg_username[:64]
+            cur.execute(
+                "INSERT INTO kf_users (username, display_name, telegram_username, role) VALUES (%s, %s, %s, %s) RETURNING id",
+                (username, display_name[:128], tg_username[:64], role)
+            )
+            user_id = cur.fetchone()[0]
+
+        tok = secrets.token_hex(32)
+        cur.execute("INSERT INTO kf_sessions (user_id, token) VALUES (%s, %s)", (user_id, tok))
+        conn.commit()
+        conn.close()
+        return {"statusCode": 200, "headers": CORS, "body": json.dumps({"token": tok, "user_id": user_id, "role": role})}
+
+    # POST /register (оставляем для совместимости)
     if method == "POST" and path.endswith("/register"):
         body = json.loads(event.get("body") or "{}")
         tg_id = body.get("telegram_id")

@@ -13,6 +13,16 @@ function authHeaders() {
   return { "Content-Type": "application/json", "X-Auth-Token": getToken() };
 }
 
+export async function sendAuthCode(telegram_username: string) {
+  const res = await fetch(`${URLS.auth}/send-code`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telegram_username }) });
+  return res.json();
+}
+
+export async function verifyAuthCode(telegram_username: string, code: string, display_name?: string) {
+  const res = await fetch(`${URLS.auth}/verify-code`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telegram_username, code, display_name }) });
+  return res.json();
+}
+
 export async function registerTg(data: { telegram_id: number; telegram_username: string; display_name: string; username: string }) {
   const res = await fetch(`${URLS.auth}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
   return res.json();

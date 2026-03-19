@@ -1,0 +1,8 @@
+CREATE TABLE kf_auth_codes (
+  id SERIAL PRIMARY KEY,
+  telegram_username VARCHAR(64) NOT NULL,
+  code VARCHAR(8) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes'),
+  used BOOLEAN NOT NULL DEFAULT FALSE
+);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { registerTg } from "@/lib/api";
+import { sendAuthCode, verifyAuthCode } from "@/lib/api";
 import { saveToken } from "@/lib/auth";
 import Icon from "@/components/ui/icon";
 
@@ -9,37 +9,51 @@ interface Props {
 }
 
 export default function AuthModal({ onSuccess, onClose }: Props) {
-  const [step, setStep] = useState<"choose" | "tg">("choose");
-  const [form, setForm] = useState({ telegram_id: "", telegram_username: "", display_name: "" });
+  const [step, setStep] = useState<"username" | "code">("username");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [code, setCode] = useState("");
+  const [hint, setHint] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleTgRegister() {
-    if (!form.telegram_id || !form.telegram_username) {
-      setError("Заполни все поля");
-      return;
-    }
+  async function handleSendCode() {
+    const clean = username.trim().replace("@", "");
+    if (!clean) { setError("Введи @username из Telegram"); return; }
     setLoading(true);
     setError("");
-    const res = await registerTg({
-      telegram_id: Number(form.telegram_id),
-      telegram_username: form.telegram_username,
-      display_name: form.display_name || form.telegram_username,
-      username: form.telegram_username,
-    });
+    setHint("");
+    const res = await sendAuthCode(clean);
+    setLoading(false);
+    if (res.ok) {
+      if (res.sent) {
+        setHint("✅ Код отправлен в Telegram! Проверь личку от бота.");
+      } else if (res.manual) {
+        setHint(res.code_hint || "Напиши боту /start и запроси код снова.");
+      }
+      setStep("code");
+    } else {
+      setError(res.error || "Ошибка");
+    }
+  }
+
+  async function handleVerify() {
+    if (!code.trim()) { setError("Введи код из Telegram"); return; }
+    setLoading(true);
+    setError("");
+    const res = await verifyAuthCode(username.trim().replace("@", ""), code.trim(), displayName || undefined);
     setLoading(false);
     if (res.token) {
       saveToken(res.token);
       onSuccess();
     } else {
-      setError(res.error || "Ошибка");
+      setError(res.error || "Неверный код");
     }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div className="relative w-full max-w-md mx-4 bg-[#0d0010] border border-[#6b1a1a] rounded-2xl shadow-2xl shadow-red-900/40 overflow-hidden">
-        {/* Demonic glow top */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-900 via-orange-600 to-red-900" />
 
         <button onClick={onClose} className="absolute top-4 right-4 text-[#8b3333] hover:text-red-400 transition-colors">
@@ -47,80 +61,107 @@ export default function AuthModal({ onSuccess, onClose }: Props) {
         </button>
 
         <div className="p-8">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-900 to-orange-800 flex items-center justify-center">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-7">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-900 to-orange-800 flex items-center justify-center shadow-lg shadow-red-900/50">
               <span className="text-2xl">🦊</span>
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Войти в Ketfox</h2>
-              <p className="text-sm text-[#8b6666]">Врата открыты для избранных</p>
+              <p className="text-sm text-[#8b6666]">Авторизация через Telegram</p>
             </div>
           </div>
 
-          {step === "choose" && (
-            <div className="space-y-3">
-              <button
-                onClick={() => setStep("tg")}
-                className="w-full flex items-center gap-3 p-4 bg-[#1a0d1a] border border-[#4a1a4a] rounded-xl hover:border-[#8b3a8b] hover:bg-[#220d22] transition-all group"
-              >
-                <div className="w-10 h-10 rounded-lg bg-[#0088cc]/20 flex items-center justify-center">
-                  <Icon name="Send" size={20} className="text-[#0088cc]" />
-                </div>
-                <div className="text-left">
-                  <div className="text-white font-semibold group-hover:text-purple-300 transition-colors">Через Telegram</div>
-                  <div className="text-xs text-[#665566]">Войти по ID из бота</div>
-                </div>
-                <Icon name="ChevronRight" size={16} className="ml-auto text-[#4a1a4a] group-hover:text-purple-400" />
-              </button>
-            </div>
-          )}
-
-          {step === "tg" && (
+          {/* Step 1 — username */}
+          {step === "username" && (
             <div className="space-y-4">
-              <button onClick={() => setStep("choose")} className="flex items-center gap-1 text-sm text-[#8b3333] hover:text-red-400 mb-2 transition-colors">
-                <Icon name="ChevronLeft" size={14} />
-                Назад
-              </button>
-
-              <div className="bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl p-4 text-sm text-[#aa88aa] space-y-1">
-                <p className="font-semibold text-purple-300 flex items-center gap-2">
-                  <Icon name="Info" size={14} />
-                  Как получить Telegram ID?
+              <div className="bg-[#150a1a] border border-[#3a1a3a] rounded-xl p-4 text-sm space-y-2">
+                <p className="text-purple-300 font-semibold flex items-center gap-2">
+                  <Icon name="Send" size={14} className="text-[#0088cc]" />
+                  Как это работает?
                 </p>
-                <p>Напиши боту <span className="text-white font-mono">@userinfobot</span> — он пришлёт твой ID</p>
+                <ol className="text-[#aa88aa] space-y-1 list-decimal list-inside">
+                  <li>Введи свой @username из Telegram</li>
+                  <li>Напиши боту <span className="text-white font-mono font-bold">@KetfoxBot</span> команду <span className="text-white font-mono">/start</span></li>
+                  <li>Нажми «Получить код» — бот пришлёт 6 цифр</li>
+                  <li>Введи код здесь — ты внутри 🔥</li>
+                </ol>
               </div>
 
-              <input
-                type="number"
-                placeholder="Telegram ID (числа)"
-                value={form.telegram_id}
-                onChange={e => setForm(f => ({ ...f, telegram_id: e.target.value }))}
-                className="w-full bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl px-4 py-3 text-white placeholder-[#4a2a4a] focus:outline-none focus:border-[#8b3a8b] transition-colors"
-              />
-              <input
-                type="text"
-                placeholder="Username в Telegram (без @)"
-                value={form.telegram_username}
-                onChange={e => setForm(f => ({ ...f, telegram_username: e.target.value.replace("@", "") }))}
-                className="w-full bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl px-4 py-3 text-white placeholder-[#4a2a4a] focus:outline-none focus:border-[#8b3a8b] transition-colors"
-              />
-              <input
-                type="text"
-                placeholder="Отображаемое имя (необязательно)"
-                value={form.display_name}
-                onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
-                className="w-full bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl px-4 py-3 text-white placeholder-[#4a2a4a] focus:outline-none focus:border-[#8b3a8b] transition-colors"
-              />
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="@username в Telegram"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleSendCode()}
+                  className="w-full bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl px-4 py-3 text-white placeholder-[#4a2a4a] focus:outline-none focus:border-[#8b3a8b] transition-colors"
+                />
+                <input
+                  type="text"
+                  placeholder="Твоё имя на сайте (необязательно)"
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value)}
+                  className="w-full bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl px-4 py-3 text-white placeholder-[#4a2a4a] focus:outline-none focus:border-[#8b3a8b] transition-colors"
+                />
+              </div>
 
               {error && <p className="text-red-400 text-sm flex items-center gap-2"><Icon name="AlertCircle" size={14} />{error}</p>}
 
               <button
-                onClick={handleTgRegister}
-                disabled={loading}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-red-800 to-orange-700 hover:from-red-700 hover:to-orange-600 text-white font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                onClick={handleSendCode}
+                disabled={loading || !username.trim()}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#0088cc]/80 to-[#0066aa]/80 hover:from-[#0088cc] hover:to-[#0066aa] text-white font-bold transition-all disabled:opacity-40 flex items-center justify-center gap-2 border border-[#0088cc]/30"
+              >
+                {loading ? <Icon name="Loader2" size={18} className="animate-spin" /> : <Icon name="Send" size={18} />}
+                {loading ? "Отправляем..." : "Получить код в Telegram"}
+              </button>
+            </div>
+          )}
+
+          {/* Step 2 — code */}
+          {step === "code" && (
+            <div className="space-y-4">
+              <button onClick={() => { setStep("username"); setCode(""); setError(""); }} className="flex items-center gap-1 text-sm text-[#8b3333] hover:text-red-400 transition-colors mb-1">
+                <Icon name="ChevronLeft" size={14} />
+                Назад
+              </button>
+
+              {hint && (
+                <div className="bg-[#0a1a0a] border border-[#1a4a1a] rounded-xl p-4 text-sm text-green-300 flex items-start gap-2">
+                  <Icon name="CheckCircle" size={16} className="flex-shrink-0 mt-0.5" />
+                  <p>{hint}</p>
+                </div>
+              )}
+
+              <div className="text-center text-[#aa88aa] text-sm mb-2">
+                Код для <span className="text-white font-mono">@{username.replace("@", "")}</span>
+              </div>
+
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="123456"
+                maxLength={6}
+                value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={e => e.key === "Enter" && handleVerify()}
+                className="w-full bg-[#1a0d1a] border border-[#3a1a3a] rounded-xl px-4 py-4 text-white placeholder-[#4a2a4a] focus:outline-none focus:border-[#8b3a8b] transition-colors text-center text-2xl font-mono tracking-[0.5em]"
+              />
+
+              {error && <p className="text-red-400 text-sm flex items-center gap-2 justify-center"><Icon name="AlertCircle" size={14} />{error}</p>}
+
+              <button
+                onClick={handleVerify}
+                disabled={loading || code.length < 6}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-red-800 to-orange-700 hover:from-red-700 hover:to-orange-600 text-white font-bold transition-all disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 {loading ? <Icon name="Loader2" size={18} className="animate-spin" /> : <Icon name="Flame" size={18} />}
                 {loading ? "Проверяем..." : "Войти в Ketfox"}
+              </button>
+
+              <button onClick={handleSendCode} disabled={loading} className="w-full text-sm text-[#664466] hover:text-[#aa6688] transition-colors py-1">
+                Отправить код повторно
               </button>
             </div>
           )}
